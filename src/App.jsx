@@ -1,54 +1,218 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CheckCircle2, Circle, Star, Settings, Wand2, Sparkles, Plus, Trash2, Gift, Scroll, PartyPopper } from 'lucide-react';
 
-// --- 魔法烟花粒子数据 (在组件外部生成，保证每次性能和动画一致性) ---
-const FIREWORK_STARS = Array.from({ length: 24 }).map((_, i) => {
-  const angle = (i * 15) + (Math.random() * 15 - 7.5); // 360度全方位散射
-  const radius = 120 + Math.random() * 150; // 扩散半径
-  const tx = Math.cos(angle * Math.PI / 180) * radius;
-  const ty = Math.sin(angle * Math.PI / 180) * radius;
-  // 随机魔法配色
-  const color = ['#fde047', '#e879f9', '#c084fc', '#ffffff', '#f472b6'][Math.floor(Math.random() * 5)];
-  const size = 12 + Math.random() * 16;
-  const rot = Math.random() * 360;
-  return { tx, ty, color, size, rot, delay: Math.random() * 0.15 }; // 微小的延迟产生错落感
-});
-
-const FIREWORK_RAYS = Array.from({ length: 16 }).map((_, i) => {
-  const angle = (i * 22.5) + (Math.random() * 5); // 锐利光束的角度
-  return { angle, delay: Math.random() * 0.1 };
-});
-
 export default function MagicRewardApp() {
-  const [view, setView] = useState('setup'); 
-  const [activeTab, setActiveTab] = useState('tasks');
+  // --- 本地缓存数据读取与初始化 ---
+  const [view, setView] = useState(() => localStorage.getItem('magic_view') || 'setup'); 
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('magic_activeTab') || 'tasks');
 
-  // --- 核心数据状态 ---
-  const [tasks, setTasks] = useState([
-    { id: 1, text: '完成数学作业', completed: false },
-    { id: 2, text: '背诵古诗一首', completed: false },
-    { id: 3, text: '阅读课外书20分钟', completed: false },
-    { id: 4, text: '自己收拾书包', completed: false },
-    { id: 5, text: '练琴30分钟', completed: false },
-    { id: 6, text: '整理自己的房间', completed: false },
-    { id: 7, text: '跳绳100下', completed: false },
-    { id: 8, text: '帮妈妈做一件家务', completed: false },
-    { id: 9, text: '晚上9点前准时洗漱', completed: false },
-  ]);
+  const [tasks, setTasks] = useState(() => {
+    const saved = localStorage.getItem('magic_tasks');
+    return saved ? JSON.parse(saved) : [
+      { id: 1, text: '完成数学作业', completed: false },
+      { id: 2, text: '背诵古诗一首', completed: false },
+      { id: 3, text: '阅读课外书20分钟', completed: false },
+      { id: 4, text: '自己收拾书包', completed: false },
+      { id: 5, text: '练琴30分钟', completed: false },
+      { id: 6, text: '整理自己的房间', completed: false },
+      { id: 7, text: '跳绳100下', completed: false },
+      { id: 8, text: '帮妈妈做一件家务', completed: false },
+      { id: 9, text: '晚上9点前准时洗漱', completed: false },
+    ];
+  });
 
-  const [rewards, setRewards] = useState([
-    '看动画片30分钟', '冰淇淋 1 个', '神秘小贴纸', 
-    '免做家务券 1 张', '去游乐园玩一次', '买一本新漫画',
-    '周末吃肯德基', '挑选一个小玩具', '爸妈陪玩游戏1小时'
-  ]);
+  const [rewards, setRewards] = useState(() => {
+    const saved = localStorage.getItem('magic_rewards');
+    return saved ? JSON.parse(saved) : [
+      '看动画片30分钟', '冰淇淋 1 个', '神秘小贴纸', 
+      '免做家务券 1 张', '去游乐园玩一次', '买一本新漫画',
+      '周末吃肯德基', '挑选一个小玩具', '爸妈陪玩游戏1小时'
+    ];
+  });
 
-  const [cards, setCards] = useState([]);
+  const [cards, setCards] = useState(() => {
+    const saved = localStorage.getItem('magic_cards');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // --- 存入缓存 ---
+  useEffect(() => { localStorage.setItem('magic_view', view); }, [view]);
+  useEffect(() => { localStorage.setItem('magic_activeTab', activeTab); }, [activeTab]);
+  useEffect(() => { localStorage.setItem('magic_tasks', JSON.stringify(tasks)); }, [tasks]);
+  useEffect(() => { localStorage.setItem('magic_rewards', JSON.stringify(rewards)); }, [rewards]);
+  useEffect(() => { localStorage.setItem('magic_cards', JSON.stringify(cards)); }, [cards]);
+
   const [newTask, setNewTask] = useState('');
   const [newReward, setNewReward] = useState('');
 
   // --- 翻牌特写动画状态 ---
   const [activeRevealCard, setActiveRevealCard] = useState(null);
-  const [revealStep, setRevealStep] = useState(0); // 0: enter, 1: flipping, 2: revealed
+  const [revealStep, setRevealStep] = useState(0); // 0: enter, 1: flipping/particles, 2: revealed
+
+  // --- 粒子特效状态 ---
+  const [currentEffect, setCurrentEffect] = useState(null);
+  const [particles, setParticles] = useState([]);
+
+  // 动态生成粒子
+  const generateParticles = useCallback((type) => {
+    let newParticles = [];
+
+    if (type === 0) {
+        // 0. 神圣耀金飞羽 (Feathers)
+        newParticles = Array.from({ length: 45 }).map(() => ({
+            id: Math.random().toString(36).substr(2, 9),
+            startX: (Math.random() - 0.5) * 40,
+            startY: (Math.random() - 0.5) * 40,
+            tx: (Math.random() - 0.5) * 500,
+            ty: (Math.random() - 0.5) * 500 - 50,
+            rot: Math.random() * 360,
+            scale: 0.3 + Math.random() * 0.8,
+            delay: Math.random() * 0.5,
+            dur: 1.2 + Math.random() * 1.2,
+            ax: (Math.random() - 0.5) * 80,
+            ay: -40 - Math.random() * 60,
+            arot: (Math.random() - 0.5) * 90,
+            color: ['#fef08a', '#ffffff', '#fed7aa', '#e9d5ff'][Math.floor(Math.random() * 4)]
+        }));
+    } else if (type === 1) {
+        // 1. 幻彩流光泡泡 (Bubbles)
+        newParticles = Array.from({ length: 80 }).map((_, i) => {
+            const startX = (Math.random() - 0.5) * 60;
+            const startY = (Math.random() - 0.5) * 80;
+            const glowColor = ['rgba(6,182,212,0.6)', 'rgba(236,72,153,0.6)', 'rgba(16,185,129,0.6)', 'rgba(245,158,11,0.6)', 'rgba(139,92,246,0.6)'][Math.floor(Math.random() * 5)];
+
+            const burstType = Math.floor(Math.random() * 5);
+            let animName, ease, burstDur, delay, tx, ty;
+            const baseDelay = Math.random() * 2.0;
+
+            switch (burstType) {
+                case 0: // A. 强力喷射
+                    animName = 'bubble-burst-spray'; ease = 'cubic-bezier(0.1, 0.9, 0.2, 1)';
+                    burstDur = 0.8 + Math.random() * 0.5; delay = baseDelay;
+                    tx = (Math.random() - 0.5) * 450; ty = (Math.random() - 0.5) * 450 - 50;
+                    break;
+                case 1: // B. 轻柔漫溢
+                    animName = 'bubble-burst-ooze'; ease = 'ease-in-out';
+                    burstDur = 1.5 + Math.random() * 1.0; delay = baseDelay + 0.3;
+                    tx = (Math.random() - 0.5) * 200; ty = -100 - Math.random() * 200;
+                    break;
+                case 2: // C. 螺旋涡流
+                    animName = 'bubble-burst-spiral'; ease = 'linear';
+                    burstDur = 1.2 + Math.random() * 0.8; delay = baseDelay + 0.1;
+                    tx = (Math.random() > 0.5 ? 1 : -1) * (150 + Math.random() * 200); ty = (Math.random() - 0.5) * 350;
+                    break;
+                case 3: // D. 群簇炸裂
+                    animName = 'bubble-burst-spray'; ease = 'cubic-bezier(0.1, 0.9, 0.3, 1)';
+                    burstDur = 0.6 + Math.random() * 0.4;
+                    const clusterGroup = Math.floor(i / 8);
+                    delay = clusterGroup * 0.4 + (Math.random() * 0.08);
+                    tx = (Math.random() - 0.5) * 300; ty = (Math.random() - 0.5) * 300 - 50;
+                    break;
+                case 4: // E. 沉浮兜底
+                    animName = 'bubble-burst-swoop'; ease = 'ease-in-out';
+                    burstDur = 1.2 + Math.random() * 0.6; delay = baseDelay;
+                    tx = (Math.random() > 0.5 ? 1 : -1) * (150 + Math.random() * 150); ty = -50 - Math.random() * 100;
+                    break;
+                default:
+                    animName = 'bubble-burst-spray'; ease = 'ease-out'; burstDur = 1; delay = 0; tx = 0; ty = 0;
+            }
+
+            return {
+                id: Math.random().toString(36).substr(2, 9),
+                startX, startY, tx, ty, animName, ease, burstDur, delay,
+                ax: (Math.random() - 0.5) * 80,
+                ay: (Math.random() - 0.5) * 60 - 30,
+                adur: 3 + Math.random() * 4,
+                scale: 0.3 + Math.random() * 1.3,
+                glowColor,
+                zIndex: Math.floor(Math.random() * 10)
+            };
+        });
+    } else if (type === 2) {
+        // 2. 魔法樱花风暴 (Sakura)
+        newParticles = Array.from({ length: 60 }).map(() => ({
+            id: Math.random().toString(36).substr(2, 9),
+            startX: (Math.random() - 0.5) * 40,
+            startY: (Math.random() - 0.5) * 40,
+            tx: (Math.random() - 0.5) * 600,
+            ty: (Math.random() - 0.5) * 600,
+            rot: Math.random() * 720,
+            scale: 0.4 + Math.random() * 0.6,
+            delay: Math.random() * 0.8,
+            burstDur: 1.5 + Math.random(),
+            ax: (Math.random() > 0.5 ? 1 : -1) * (100 + Math.random() * 200),
+            ay: (Math.random() - 0.5) * 100,
+            arot: Math.random() * 360,
+            adur: 3 + Math.random() * 2,
+            color: ['#fbcfe8', '#fce7f3', '#f472b6', '#fdf2f8'][Math.floor(Math.random() * 4)],
+            zIndex: Math.floor(Math.random() * 10)
+        }));
+    }
+
+    setParticles(newParticles);
+  }, []);
+
+  const renderParticles = () => {
+    if (currentEffect === 0) {
+        return particles.map((feather) => (
+            <div key={feather.id} className="absolute top-1/2 left-1/2 pointer-events-none" style={{
+                '--startX': `${feather.startX}px`, '--startY': `${feather.startY}px`,
+                '--tx': `${feather.tx}px`, '--ty': `${feather.ty}px`,
+                '--rot': `${feather.rot}deg`, '--scale': feather.scale,
+                animation: `feather-burst ${feather.dur}s ease-out forwards`,
+                animationDelay: `${feather.delay}s`,
+                marginTop: '-10px', marginLeft: '-4px'
+            }}>
+                <div style={{
+                    '--ax': `${feather.ax}px`, '--ay': `${feather.ay}px`, '--arot': `${feather.arot}deg`,
+                    animation: `feather-ambient 4s ease-in-out infinite alternate`,
+                    animationDelay: `${feather.delay + feather.dur}s`,
+                    width: '8px', height: '20px', backgroundColor: feather.color,
+                    borderRadius: '50% 50% 0 0', clipPath: 'polygon(50% 0%, 100% 20%, 80% 100%, 50% 80%, 20% 100%, 0% 20%)'
+                }} />
+            </div>
+        ));
+    } else if (currentEffect === 1) {
+        return particles.map((bubble) => (
+            <div key={bubble.id} className="absolute top-1/2 left-1/2 pointer-events-none" style={{
+                '--startX': `${bubble.startX}px`, '--startY': `${bubble.startY}px`,
+                '--tx': `${bubble.tx}px`, '--ty': `${bubble.ty}px`,
+                '--scale': bubble.scale,
+                animation: `${bubble.animName} ${bubble.burstDur}s ${bubble.ease} forwards`,
+                animationDelay: `${bubble.delay}s`,
+                marginTop: '-12px', marginLeft: '-12px', zIndex: bubble.zIndex
+            }}>
+                <div className="rounded-full border border-white/80 bg-white/10 backdrop-blur-sm" style={{
+                    width: '24px', height: '24px',
+                    boxShadow: `inset 0 0 10px #fff, inset 5px 0 15px ${bubble.glowColor}, 0 0 15px ${bubble.glowColor}`,
+                    '--ax': `${bubble.ax}px`, '--ay': `${bubble.ay}px`,
+                    animation: `bubble-ambient ${bubble.adur}s ease-in-out infinite alternate`,
+                    animationDelay: `${bubble.delay + bubble.burstDur}s`
+                }} />
+            </div>
+        ));
+    } else if (currentEffect === 2) {
+        return particles.map((petal) => (
+            <div key={petal.id} className="absolute top-1/2 left-1/2 pointer-events-none" style={{
+                '--startX': `${petal.startX}px`, '--startY': `${petal.startY}px`,
+                '--tx': `${petal.tx}px`, '--ty': `${petal.ty}px`,
+                '--rot': `${petal.rot}deg`, '--scale': petal.scale,
+                animation: `sakura-burst ${petal.burstDur}s cubic-bezier(0.2, 0.8, 0.2, 1) forwards`,
+                animationDelay: `${petal.delay}s`,
+                marginTop: '-6px', marginLeft: '-6px', zIndex: petal.zIndex
+            }}>
+                <div className="sakura-petal" style={{
+                    width: '12px', height: '12px', backgroundColor: petal.color,
+                    '--ax': `${petal.ax}px`, '--ay': `${petal.ay}px`, '--arot': `${petal.arot}deg`,
+                    animation: `sakura-ambient ${petal.adur}s ease-in-out forwards`,
+                    animationDelay: `${petal.delay + petal.burstDur}s`,
+                    boxShadow: `0 0 6px ${petal.color}`
+                }} />
+            </div>
+        ));
+    }
+    return null;
+  };
 
   const completedTasksCount = tasks.filter(t => t.completed).length;
   const flippedCardsCount = cards.filter(c => c.isFlipped).length;
@@ -74,7 +238,7 @@ export default function MagicRewardApp() {
     setActiveTab('tasks');
   };
 
-  // 触发翻牌特写 (聚光灯效应)
+  // 触发翻牌特写 (聚光灯效应 + 新粒子特效爆发)
   const triggerReveal = (card) => {
     if (magicEnergy <= 0) {
       alert('魔法能量不足啦！快去完成任务获取能量吧~');
@@ -83,9 +247,14 @@ export default function MagicRewardApp() {
     setActiveRevealCard(card);
     setRevealStep(0);
     
+    // 随机选择一种新动画效果 (0:耀金飞羽, 1:幻彩泡泡, 2:樱花风暴)
+    const newEffect = Math.floor(Math.random() * 3);
+    setCurrentEffect(newEffect);
+    
     // 延迟触发翻转，产生蓄力爆开的感觉
     setTimeout(() => {
       setRevealStep(1);
+      generateParticles(newEffect); // 触发满屏特效
     }, 150);
 
     // 翻转完成后显示奖励和按钮
@@ -98,6 +267,8 @@ export default function MagicRewardApp() {
   const confirmReward = () => {
     setCards(cards.map(c => c.id === activeRevealCard.id ? { ...c, isFlipped: true } : c));
     setActiveRevealCard(null);
+    setCurrentEffect(null);
+    setParticles([]);
   };
 
   // 切换任务
@@ -113,8 +284,7 @@ export default function MagicRewardApp() {
   const handleAddReward = () => { if (newReward.trim()) { setRewards([...rewards, newReward.trim()]); setNewReward(''); } };
   const removeReward = (index) => setRewards(rewards.filter((_, i) => i !== index));
 
-  // --- 注入自定义炫酷 CSS 动画 ---
-  // 这部分实现了流光、呼吸、全息反光和爆点特效
+  // --- 注入混合 CSS 动画 ---
   const customStyles = `
     @keyframes float-card {
       0%, 100% { transform: translateY(0px); }
@@ -142,17 +312,58 @@ export default function MagicRewardApp() {
       0% { background-position: 200% 0; }
       100% { background-position: -200% 0; }
     }
-    @keyframes firework-star {
-      /* 0%: 中心点缩小待命 */
-      0% { transform: translate(0, 0) scale(0) rotate(0deg); opacity: 1; }
-      /* 30%: 瞬间炸开到目标点 */
-      30% { transform: translate(var(--tx), var(--ty)) scale(1) rotate(var(--rot)); opacity: 1; }
-      /* 100%: 缓缓坠落并消散(重力模拟) */
-      100% { transform: translate(calc(var(--tx) * 1.2), calc(var(--ty) + 180px)) scale(0.3) rotate(calc(var(--rot) + 180deg)); opacity: 0; }
+        
+    /* 0. 耀金飞羽 (Feathers) */
+    @keyframes feather-burst {
+      0% { transform: translate(var(--startX), var(--startY)) rotate(0deg) scale(0); opacity: 0; filter: brightness(2); }
+      20% { opacity: 1; transform: translate(calc(var(--startX) + (var(--tx) - var(--startX))*0.5), calc(var(--startY) + (var(--ty) - var(--startY))*0.5)) rotate(180deg) scale(var(--scale)); }
+      100% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)) scale(var(--scale)); opacity: 0; }
     }
-    @keyframes firework-ray {
-      0% { transform: rotate(var(--angle)) translateY(0) scaleY(0.2); opacity: 1; filter: brightness(2); }
-      100% { transform: rotate(var(--angle)) translateY(-250px) scaleY(1.5); opacity: 0; }
+    @keyframes feather-ambient {
+      0% { transform: translate(0, 0) rotate(0deg); }
+      100% { transform: translate(var(--ax), var(--ay)) rotate(var(--arot)); opacity: 0.95; filter: drop-shadow(0 0 8px rgba(250,204,21,0.6)); }
+    }
+
+    /* 1. 幻彩泡泡 (Bubbles) - 5种出场姿态与S型环境游走 */
+    @keyframes bubble-burst-spray {
+      0% { transform: translate(var(--startX), var(--startY)) scale(0); opacity: 0; }
+      15% { opacity: 1; transform: translate(calc(var(--startX) + (var(--tx) - var(--startX))*0.3), calc(var(--startY) + (var(--ty) - var(--startY))*0.3)) scale(calc(var(--scale)*1.1)); }
+      100% { transform: translate(var(--tx), var(--ty)) scale(var(--scale)); opacity: 0.9; }
+    }
+    @keyframes bubble-burst-ooze {
+      0% { transform: translate(var(--startX), var(--startY)) scale(0); opacity: 0; }
+      30% { opacity: 1; transform: translate(calc(var(--startX) + (var(--tx) - var(--startX))*0.1), calc(var(--startY) + (var(--ty) - var(--startY))*0.1)) scale(calc(var(--scale)*0.8)); }
+      100% { transform: translate(var(--tx), var(--ty)) scale(var(--scale)); opacity: 0.9; }
+    }
+    @keyframes bubble-burst-spiral {
+      0% { transform: translate(var(--startX), var(--startY)) scale(0); opacity: 0; }
+      30% { opacity: 1; transform: translate(calc(var(--startX) + var(--tx)*0.6), calc(var(--startY) - 80px)) scale(var(--scale)); }
+      70% { transform: translate(calc(var(--startX) + var(--tx)*1.2), calc(var(--ty) - 40px)) scale(calc(var(--scale)*1.1)); }
+      100% { transform: translate(var(--tx), var(--ty)) scale(var(--scale)); opacity: 0.9; }
+    }
+    @keyframes bubble-burst-swoop {
+      0% { transform: translate(var(--startX), var(--startY)) scale(0); opacity: 0; }
+      40% { opacity: 1; transform: translate(calc(var(--startX) + (var(--tx) - var(--startX))*0.4), calc(var(--startY) + 120px)) scale(calc(var(--scale)*0.9)); }
+      100% { transform: translate(var(--tx), var(--ty)) scale(var(--scale)); opacity: 0.9; }
+    }
+    
+    @keyframes bubble-ambient {
+      0% { transform: translate(0, 0) scale(1, 1); opacity: 0.9; }
+      33% { transform: translate(calc(var(--ax)*0.8), calc(var(--ay)*0.3)) scale(1.04, 0.96); opacity: 1; }
+      66% { transform: translate(calc(var(--ax)*0.2), calc(var(--ay)*0.7)) scale(0.96, 1.04); opacity: 0.95; }
+      100% { transform: translate(var(--ax), var(--ay)) scale(1.02, 0.98); opacity: 0.9; }
+    }
+
+    /* 2. 樱花风暴 (Sakura) */
+    .sakura-petal { border-radius: 15px 0 15px 15px; }
+    @keyframes sakura-burst {
+      0% { transform: translate(var(--startX), var(--startY)) rotate(0deg) scale(0); opacity: 0; }
+      20% { opacity: 1; transform: translate(calc(var(--tx)*0.3), calc(var(--ty)*0.3)) rotate(180deg) scale(var(--scale)); }
+      100% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)) scale(var(--scale)); opacity: 0.8; }
+    }
+    @keyframes sakura-ambient {
+      0% { transform: translate(0, 0) rotate(0deg); }
+      100% { transform: translate(var(--ax), var(--ay)) rotate(var(--arot)); opacity: 0; }
     }
   `;
 
@@ -219,37 +430,10 @@ export default function MagicRewardApp() {
       {activeRevealCard && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
           
-          {/* 光效爆点 (卡牌翻转到一半时爆发: 魔法星辰礼花) */}
+          {/* 光效粒子容器 */}
           {revealStep >= 1 && (
-             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-0">
-                {/* 1. 光芒射线 (瞬间放射) */}
-                {FIREWORK_RAYS.map((ray, i) => (
-                  <div key={`ray-${i}`} className="absolute top-1/2 left-1/2 w-1.5 h-32 origin-bottom rounded-full mix-blend-screen"
-                       style={{
-                         background: 'linear-gradient(to top, transparent, rgba(253, 224, 71, 0.8), #fff)',
-                         '--angle': `${ray.angle}deg`,
-                         animation: `firework-ray 0.6s ease-out forwards`,
-                         animationDelay: `${ray.delay}s`,
-                         marginTop: '-8rem', // 从中心点向上生长
-                         marginLeft: '-0.1875rem' 
-                       }} />
-                ))}
-                {/* 2. 魔法星辰 (抛出并受重力下落) */}
-                {FIREWORK_STARS.map((star, i) => (
-                  <div key={`star-${i}`} className="absolute top-1/2 left-1/2 drop-shadow-[0_0_8px_currentColor]"
-                       style={{
-                         '--tx': `${star.tx}px`,
-                         '--ty': `${star.ty}px`,
-                         '--rot': `${star.rot}deg`,
-                         animation: `firework-star 1.2s cubic-bezier(0.15, 1, 0.3, 1) forwards`,
-                         animationDelay: `${star.delay}s`,
-                         color: star.color,
-                         marginTop: `-${star.size / 2}px`,
-                         marginLeft: `-${star.size / 2}px`
-                       }}>
-                     <Star className="fill-current" style={{ width: star.size, height: star.size }} />
-                  </div>
-                ))}
+             <div className="absolute inset-0 pointer-events-none overflow-visible z-0">
+                {renderParticles()}
              </div>
           )}
 
@@ -261,7 +445,7 @@ export default function MagicRewardApp() {
                 transform: revealStep >= 1 ? 'rotateY(180deg) scale(1.1)' : 'rotateY(0deg) scale(0.9)'
               }}
             >
-              {/* 卡牌背面 (大尺寸) */}
+              {/* 卡牌背面 */}
               <div 
                 className="absolute inset-0 w-full h-full rounded-2xl border-2 border-yellow-400 shadow-[0_0_30px_rgba(250,204,21,0.6)] bg-gradient-to-br from-indigo-600 to-purple-800 flex flex-col items-center justify-center"
                 style={{ backfaceVisibility: 'hidden' }}
@@ -270,17 +454,15 @@ export default function MagicRewardApp() {
                 <div className="text-yellow-300 text-lg font-bold tracking-widest">命运开启</div>
               </div>
 
-              {/* 卡牌正面 (全息闪卡质感) */}
+              {/* 卡牌正面 */}
               <div 
                 className="absolute inset-0 w-full h-full rounded-2xl shadow-[0_0_50px_rgba(232,121,249,0.8)] flex flex-col items-center justify-center p-4 text-center overflow-hidden"
                 style={{ 
                   backfaceVisibility: 'hidden',
                   transform: 'rotateY(180deg)',
-                  // 基础金属渐变底色
                   background: 'linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%)'
                 }}
               >
-                {/* 动态全息反光层 */}
                 <div className="absolute inset-0 holo-shine pointer-events-none mix-blend-overlay opacity-80" />
                 
                 <div className="relative z-10 flex flex-col items-center bg-white/50 backdrop-blur-sm p-4 rounded-xl border border-white/40 w-full h-full justify-center shadow-inner">
@@ -364,29 +546,25 @@ export default function MagicRewardApp() {
               {cards.map((card, index) => {
                 const isReadyToDraw = magicEnergy > 0 && !card.isFlipped;
                 return (
-                  // 待机呼吸感 (float-card) & 交互微缩蓄力 (active:scale-90)
                   <div 
                     key={card.id}
-                    onTouchStart={() => {}} // 修复移动端 active 伪类生效的问题
+                    onTouchStart={() => {}}
                     onClick={() => !card.isFlipped && triggerReveal(card)}
                     className={`relative w-full aspect-[2/3] cursor-pointer group perspective-1000 
                       ${isReadyToDraw ? 'animate-[float-card_3s_ease-in-out_infinite]' : ''}`}
-                    style={{ animationDelay: `${index * 0.15}s` }} // 让呼吸感错落有致
+                    style={{ animationDelay: `${index * 0.15}s` }}
                   >
                     <div className={`w-full h-full relative transition-transform duration-300 
                       ${!card.isFlipped && magicEnergy > 0 ? 'group-active:scale-90' : ''}`}
                       style={{ transformStyle: 'preserve-3d' }}
                     >
-                      {/* --- 卡牌背面 (在网格中未翻开) --- */}
+                      {/* --- 卡牌背面 --- */}
                       {!card.isFlipped && (
                         <div className="absolute inset-0 w-full h-full rounded-xl overflow-hidden shadow-lg" style={{ backfaceVisibility: 'hidden' }}>
-                          {/* 边缘流光动画层 */}
                           {isReadyToDraw ? (
                              <>
-                               {/* 旋转的渐变背景 (光芒汇聚: 按下时通过 group-active 改变动画和颜色) */}
                                <div className="absolute inset-[-100%] magic-glow-border animate-[spin-slow_2s_linear_infinite]" 
                                     style={{ background: 'conic-gradient(from 90deg at 50% 50%, transparent 50%, #fbbf24 100%)' }} />
-                               {/* 遮罩内层，露出 2px 的边缘作为流光 */}
                                <div className="absolute inset-[2px] rounded-lg bg-gradient-to-br from-indigo-800 to-purple-900 flex flex-col items-center justify-center">
                                  <Star className="w-8 h-8 mb-1 text-yellow-300" />
                                  <div className="w-6 h-6 rounded-full border border-white/20 flex items-center justify-center">
@@ -395,7 +573,6 @@ export default function MagicRewardApp() {
                                </div>
                              </>
                           ) : (
-                             // 能量不足时的普通态
                              <div className="absolute inset-0 rounded-xl border-2 border-purple-500/30 bg-gradient-to-br from-indigo-800 to-purple-900 flex flex-col items-center justify-center">
                                 <Star className="w-8 h-8 mb-1 text-purple-400/50" />
                              </div>
@@ -403,7 +580,7 @@ export default function MagicRewardApp() {
                         </div>
                       )}
 
-                      {/* --- 卡牌正面 (在网格中已翻开的静态展示) --- */}
+                      {/* --- 卡牌正面 --- */}
                       {card.isFlipped && (
                         <div className="absolute inset-0 w-full h-full rounded-xl border border-fuchsia-300/50 shadow-inner bg-gradient-to-br from-pink-100 to-purple-100 flex flex-col items-center justify-center p-2 text-center opacity-80 filter saturate-50">
                           <Gift className="text-fuchsia-400 w-5 h-5 mb-1" />
