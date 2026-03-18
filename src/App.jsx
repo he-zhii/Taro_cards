@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CheckCircle2, Circle, Star, Settings, Wand2, Sparkles, Plus, Trash2, Gift, Scroll, PartyPopper } from 'lucide-react';
+import { playSound } from './audio.js';
 
 export default function MagicRewardApp() {
   // --- 本地缓存数据读取与初始化 ---
@@ -34,6 +35,10 @@ export default function MagicRewardApp() {
     const saved = localStorage.getItem('magic_cards');
     return saved ? JSON.parse(saved) : [];
   });
+
+  // --- 家长锁状态 ---
+  const [showParentLock, setShowParentLock] = useState(false);
+  const [mathQuestion, setMathQuestion] = useState({ a: 0, b: 0, answer: '' });
 
   // --- 存入缓存 ---
   useEffect(() => { localStorage.setItem('magic_view', view); }, [view]);
@@ -255,6 +260,7 @@ export default function MagicRewardApp() {
     setTimeout(() => {
       setRevealStep(1);
       generateParticles(newEffect); // 触发满屏特效
+      playSound.magicReveal(); // 播放魔法音效
     }, 150);
 
     // 翻转完成后显示奖励和按钮
@@ -265,6 +271,7 @@ export default function MagicRewardApp() {
 
   // 确认收下奖励，更新主网格状态
   const confirmReward = () => {
+    playSound.tada(); // 播放获得奖励音效
     setCards(cards.map(c => c.id === activeRevealCard.id ? { ...c, isFlipped: true } : c));
     setActiveRevealCard(null);
     setCurrentEffect(null);
@@ -273,9 +280,29 @@ export default function MagicRewardApp() {
 
   // 切换任务
   const toggleTask = (taskId) => {
-    setTasks(tasks.map(task => 
-      task.id === taskId ? { ...task, completed: !task.completed } : task
-    ));
+    setTasks(tasks.map(task => {
+      if (task.id === taskId) {
+        if (!task.completed) playSound.ding(); // 完成任务音效
+        return { ...task, completed: !task.completed };
+      }
+      return task;
+    }));
+  };
+
+  // --- 家长锁验证逻辑 ---
+  const requestSetupAccess = () => {
+    setMathQuestion({ a: Math.floor(Math.random() * 8) + 2, b: Math.floor(Math.random() * 8) + 2, answer: '' });
+    setShowParentLock(true);
+  };
+
+  const verifySetupAccess = () => {
+    if (parseInt(mathQuestion.answer) === mathQuestion.a * mathQuestion.b) {
+      setShowParentLock(false);
+      setView('setup');
+    } else {
+      alert('回答错误，只有家长才能进入设置哦！');
+      setShowParentLock(false);
+    }
   };
 
   // 家长设置操作
@@ -426,6 +453,42 @@ export default function MagicRewardApp() {
     <div className="min-h-screen bg-gradient-to-b from-purple-900 via-indigo-950 to-slate-900 text-white flex flex-col max-w-md mx-auto relative overflow-hidden font-sans select-none">
       <style>{customStyles}</style>
 
+      {/* --- 家长验证锁弹窗 --- */}
+      {showParentLock && (
+        <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-300 px-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl">
+            <Settings className="w-12 h-12 text-purple-600 mx-auto mb-4" />
+            <h3 className="text-xl font-bold text-slate-800 mb-2">家长身份确认</h3>
+            <p className="text-slate-500 text-sm mb-6">请输入这道题的答案以验证家长身份</p>
+            <div className="text-4xl font-black text-purple-900 mb-6 drop-shadow-sm">
+              {mathQuestion.a} × {mathQuestion.b} = <span className="text-orange-500">?</span>
+            </div>
+            <input 
+              type="number" 
+              autoFocus
+              className="w-full bg-slate-100 rounded-xl px-4 py-4 text-center text-2xl font-bold mb-6 text-slate-800 outline-none focus:ring-4 focus:ring-purple-200 transition-shadow"
+              value={mathQuestion.answer}
+              onChange={(e) => setMathQuestion({...mathQuestion, answer: e.target.value})}
+              onKeyDown={(e) => e.key === 'Enter' && verifySetupAccess()}
+            />
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowParentLock(false)}
+                className="flex-1 px-4 py-3 rounded-xl bg-slate-200 text-slate-700 font-bold active:scale-95 transition-transform"
+              >
+                取消
+              </button>
+              <button 
+                onClick={verifySetupAccess}
+                className="flex-1 px-4 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold active:scale-95 transition-transform shadow-lg shadow-purple-500/30"
+              >
+                验证
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- 全屏特写动画弹窗 (聚光灯效应) --- */}
       {activeRevealCard && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
@@ -504,7 +567,7 @@ export default function MagicRewardApp() {
               <p className="text-2xl font-black text-yellow-400">{magicEnergy} <span className="text-sm font-normal text-white/70">次抽取机会</span></p>
             </div>
           </div>
-          <button onClick={() => setView('setup')} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center active:bg-white/20">
+          <button onClick={requestSetupAccess} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center active:bg-white/20">
             <Settings className="w-5 h-5 text-white/70" />
           </button>
         </div>
